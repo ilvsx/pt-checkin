@@ -98,6 +98,21 @@ jobs:
           done < <(grep -rhoE 'c_secure_uid=[A-Za-z0-9%+/=]{8,}' \
                      --exclude-dir=.git --exclude-dir=.github --exclude-dir=__pycache__ -I . | cut -d= -f2 | sort -u)
 
+          # 其他形态的会话 Cookie（如 QingWa 的 qw_session、PHPSESSID）。
+          # 仅 c_secure_* 的检查会漏掉这类站点，因此必须单独覆盖。
+          echo "── 其他会话 Cookie（qw_session / PHPSESSID / session 等）──"
+          allow_session='00000000-0000-0000-0000-000000000000'
+          while read -r entry; do
+            [ -z "$entry" ] && continue
+            value="${entry#*=}"
+            if [ "$value" != "$allow_session" ]; then
+              echo "::error::疑似真实会话 Cookie: $entry"
+              fail=1
+            fi
+          done < <(grep -rhoE '[A-Za-z_]*(session|sess|sid|token|auth)[A-Za-z_]*=[A-Za-z0-9%._~-]{8,}' \
+                     --exclude-dir=.git --exclude-dir=.github --exclude-dir=__pycache__ -I . \
+                   | sort -u | sed -E 's/^[;"'"'"'[:space:]]*//')
+
           if [ "$fail" -ne 0 ]; then
             echo "请改用占位符，并确认未把真实 Cookie 提交进仓库。"
             exit 1

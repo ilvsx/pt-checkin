@@ -257,12 +257,18 @@ def _extract_object_ledger(html: str) -> dict[str, AttendanceRecord]:
 def _parse_events_array(payload: str) -> dict[str, AttendanceRecord]:
     """把 FullCalendar 事件数组转成 ``{日期: 记录}``。
 
-    **只要日期出现即视为已签到** —— 实测存在只有背景事件、没有 title 的日期。
+    **只有带 ``title``（积分）的日期才算已签到。**
 
-    这类"只有背景、没有积分"的日期是**补签**：实测每个这样的日期之后，
-    连续签到奖励都会重置回 10（例如 2026-09-08 得 100 → 09-09 无积分 →
-    09-10 得 10），说明补签既不得分也不计入连续签到。因此标记为
-    ``is_retroactive=1``，供连续天数计算排除。
+    日历里同时存在两类事件：``{"display":"background"}`` 与 ``{"title":60}``。
+    起初以为"有背景事件即已签到"，但实测被证伪：
+
+    * QingWa 的日历标记了 **31 天**（2026-08-16 → 09-15），其中只有 1 天带积分，
+      而站点自报 **「已连续签到 1 天」** —— 若背景事件也算签到，连续天数应 ≥ 31。
+    * HDFans 同样吻合：标记 61 天、其中 57 天带积分，连续 6 天即最近 6 个带积分日期。
+
+    所以 ``display:"background"`` 只是标记"该日在补签窗口内"（页面上那句
+    "点击白色背景的圆点进行补签"正是指这些日子），**并不代表已签到**。
+    若把未签到的今天当成已签到，调度器将永远不会签到，因此这里必须严格。
     """
     try:
         events = json.loads(payload)
@@ -271,27 +277,22 @@ def _parse_events_array(payload: str) -> dict[str, AttendanceRecord]:
     if not isinstance(events, list) or not events:
         return {}
 
-    merged: dict[str, dict[str, Any]] = {}
+    records: dict[str, AttendanceRecord] = {}
     for item in events:
         if not isinstance(item, dict) or "start" not in item:
+            continue
+        if item.get("title") is None:
+            # 背景事件：仅表示在补签窗口内，不是签到记录
             continue
         date = normalize_date(item.get("start"))
         if not date:
             continue
-        entry = merged.setdefault(date, {"points": None, "has_points": False})
-        if item.get("title") is not None:
-            points = _as_int(item.get("title"))
-            if points is not None:
-                entry["points"] = points
-                entry["has_points"] = True
-
-    records: dict[str, AttendanceRecord] = {}
-    for date, entry in merged.items():
-        records[date] = AttendanceRecord(
-            date=date,
-            points=entry["points"],
-            is_retroactive=0 if entry["has_points"] else 1,
-        )
+        points = _as_int(item.get("title"))
+        existing = records.get(date)
+        if existing is None or points is not None:
+            records[date] = AttendanceRecord(
+                date=date, points=points, is_retroactive=0
+            )
     return records
 
 

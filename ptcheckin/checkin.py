@@ -259,18 +259,8 @@ class CheckinService:
 
     # ------------------------------------------------------------ internals
     def _sync_ledger(self, account_id: int, page: AttendancePage) -> int:
-        count = 0
-        for date_str, record in page.records.items():
-            self.store.upsert_day(
-                account_id,
-                date_str,
-                signed=True,
-                points=record.points,
-                is_retroactive=record.is_retroactive,
-                site_created_at=record.created_at,
-                source="site",
-            )
-            count += 1
+        """把站点台账同步进本地每日台账（站点为权威来源）。"""
+        count, _removed = self.store.sync_ledger(account_id, page.records)
         return count
 
     @staticmethod

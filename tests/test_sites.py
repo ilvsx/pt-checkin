@@ -18,7 +18,9 @@ from ptcheckin.sites import DEFAULT_SITE, get_profile, guess_site, list_profiles
 
 TODAY = "2026-09-15"
 
-# 2026-08-24 只有背景事件没有 title —— 实测存在这种情况，必须也算已签到
+# 日历里同时有 background 与 title 事件。实测结论：
+#   只有带 title（积分）的日期才算已签到；
+#   仅 background 的日期只是"在补签窗口内"，并不代表已签到。
 EVENTS_WITH_TODAY = (
     '[{"start":"2026-08-24","end":"2026-08-24","display":"background"},'
     '{"start":"2026-09-13","end":"2026-09-13","display":"background"},'
@@ -35,6 +37,22 @@ EVENTS_WITHOUT_TODAY = (
     '{"start":"2026-09-13","end":"2026-09-13","title":10},'
     '{"start":"2026-09-14","end":"2026-09-14","display":"background"},'
     '{"start":"2026-09-14","end":"2026-09-14","title":20}]'
+)
+
+# 今天只被标记为 background、还没签到（最危险的场景）
+EVENTS_TODAY_BACKGROUND_ONLY = (
+    '[{"start":"2026-09-13","end":"2026-09-13","display":"background"},'
+    '{"start":"2026-09-13","end":"2026-09-13","title":10},'
+    '{"start":"2026-09-15","end":"2026-09-15","display":"background"}]'
+)
+
+# 取自 QingWa 真实结构：日历标记 31 天，其中只有 1 天带积分，
+# 而站点自报"已连续签到 1 天" —— 这是证明 background ≠ 已签到的关键证据。
+QINGWA_EVENTS = (
+    '[{"start":"2026-08-16","end":"2026-08-16","display":"background"},'
+    '{"start":"2026-09-14","end":"2026-09-14","display":"background"},'
+    '{"start":"2026-09-15","end":"2026-09-15","display":"background"},'
+    '{"start":"2026-09-15","end":"2026-09-15","title":10}]'
 )
 
 MESSAGE_HTML = (
@@ -93,47 +111,51 @@ class TestHdfansLedger(unittest.TestCase):
     def test_events_ledger_detected(self):
         records, fmt = extract_ledger(build_page())
         self.assertEqual(fmt, "events")
-        self.assertEqual(set(records), {"2026-08-24", "2026-09-13", "2026-09-14", "2026-09-15"})
+        # 只有带 title 的三天算已签到；08-24 仅 background，不算
+        self.assertEqual(set(records), {"2026-09-13", "2026-09-14", "2026-09-15"})
 
     def test_points_from_title(self):
         records = extract_calendar_events(build_page())
         self.assertEqual(records["2026-09-15"].points, 60)
         self.assertEqual(records["2026-09-13"].points, 10)
 
-    def test_background_only_date_counts_as_signed(self):
-        """只有背景事件、没有 title 的日期也必须算已签到。"""
-        records = extract_calendar_events(build_page())
-        self.assertIn("2026-08-24", records)
-        self.assertIsNone(records["2026-08-24"].points)
+    def test_background_only_date_is_not_signed(self):
+        """**关键**：只有 background 事件、没有积分的日期不算已签到。
 
-    def test_background_only_date_is_marked_retroactive(self):
-        """只有背景事件的日期是补签：不计积分，也不计入连续签到。
-
-        依据：实测每个这类日期之后连续奖励都会重置
-        （09-08 得 100 → 09-09 无积分 → 09-10 得 10）。
+        证据：QingWa 日历标记 31 天但只有 1 天带积分，站点自报"连续签到 1 天"。
+        若把 background 当已签到，未签到的今天会被误判为已签到，
+        调度器将永远不会签到。
         """
         records = extract_calendar_events(build_page())
-        self.assertEqual(records["2026-08-24"].is_retroactive, 1)
+        self.assertNotIn("2026-08-24", records)
+
+    def test_today_background_only_means_not_signed(self):
+        page = build_page(events=EVENTS_TODAY_BACKGROUND_ONLY, message="")
+        parsed = parse_attendance(page, fallback_date=TODAY)
+        self.assertIn("2026-09-13", parsed.records)
+        self.assertFalse(parsed.signed_today, "今天只是被标记，尚未签到")
 
     def test_normal_date_is_not_retroactive(self):
         records = extract_calendar_events(build_page())
         self.assertEqual(records["2026-09-15"].is_retroactive, 0)
         self.assertEqual(records["2026-09-15"].points, 60)
 
-    def test_zero_point_title_is_not_retroactive(self):
-        """title 为 0 表示"有积分记录"，不应被当成补签。"""
+    def test_zero_point_title_counts_as_signed(self):
+        """title 为 0 是"有积分记录"，仍算已签到。"""
         page = build_page(events='[{"start":"2026-09-15","display":"background"},'
                                  '{"start":"2026-09-15","title":0}]')
-        self.assertEqual(extract_calendar_events(page)["2026-09-15"].is_retroactive, 0)
+        records = extract_calendar_events(page)
+        self.assertIn("2026-09-15", records)
+        self.assertEqual(records["2026-09-15"].points, 0)
 
     def test_unescapes_js_single_quoted_string(self):
         page = build_page(events=EVENTS_WITH_TODAY.replace('"', '\\"'))
-        self.assertEqual(len(extract_calendar_events(page)), 4)
+        self.assertEqual(len(extract_calendar_events(page)), 3)
 
     def test_inline_array_without_json_parse(self):
         page = '<script>var events = %s;</script>' % EVENTS_WITH_TODAY
         records = extract_calendar_events(page)
-        self.assertEqual(len(records), 4)
+        self.assertEqual(len(records), 3)
 
     def test_empty_ledger(self):
         self.assertEqual(extract_calendar_events(build_page(events="[]")), {})
@@ -162,7 +184,7 @@ class TestHdfansParse(unittest.TestCase):
         self.assertEqual(page.site_date_source, "fallback")
         self.assertFalse(page.signed_today, "今天不在台账里，必须判定为未签到")
         self.assertIsNone(page.today_record)
-        self.assertEqual(len(page.records), 3, "历史台账仍应被解析出来")
+        self.assertEqual(len(page.records), 2, "历史台账仍应被解析出来")
 
     def test_ledger_max_used_only_without_fallback(self):
         page = parse_attendance(build_page(events=EVENTS_WITHOUT_TODAY))
@@ -233,6 +255,73 @@ class TestSigninBonus(unittest.TestCase):
         self.assertEqual(extract_signin_bonus("<html><body>nothing</body></html>"), (None, None))
 
 
+class TestQingwaSite(unittest.TestCase):
+    """QingWa：单会话 Cookie（qw_session）+ 日历事件台账 + 蝌蚪积分。"""
+
+    MESSAGE = (
+        "这是您的第 <b>142</b> 次签到，已连续签到 <b>1</b> 天，本次签到获得 <b>10</b> 个蝌蚪。"
+        "点击白色背景的圆点进行补签。你目前拥有补签卡 <b>0</b> 张。"
+        '<span style="float:right">今日签到排名：<b>3558</b> / <b>3558</b></span>'
+    )
+
+    def _page(self, events=QINGWA_EVENTS, message=None):
+        return build_page(
+            events=events,
+            message=message if message is not None else self.MESSAGE,
+            bonus=10, cards=0, heading="签到成功",
+            title="青蛙 :: 签到 - Powered by NexusPHP",
+        )
+
+    def test_profile(self):
+        profile = get_profile("qingwapt")
+        self.assertEqual(profile.name, "QingWa")
+        self.assertEqual(profile.points_unit, "蝌蚪")
+        self.assertEqual(profile.default_base_url, "https://www.qingwapt.com")
+        self.assertEqual(profile.referer, "index.php")
+
+    def test_guess_site_from_url(self):
+        self.assertEqual(guess_site("https://www.qingwapt.com"), "qingwapt")
+        self.assertEqual(guess_site("https://www.qingwapt.com/attendance.php"), "qingwapt")
+
+    def test_only_titled_dates_are_signed(self):
+        """日历标记多个日期，但只有带积分的那天算已签到。
+
+        这与站点自报"已连续签到 1 天"一致 —— 是推翻
+        "background 也算已签到" 的关键证据。
+        """
+        page = parse_attendance(self._page(), fallback_date=TODAY)
+        self.assertEqual(set(page.records), {"2026-09-15"})
+        self.assertTrue(page.signed_today)
+        self.assertEqual(page.today_record.points, 10)
+
+    def test_message_and_unit(self):
+        page = parse_attendance(self._page(), fallback_date=TODAY)
+        self.assertEqual(page.total_count, 142)
+        self.assertEqual(page.streak, 1)
+        self.assertEqual(page.points, 10)
+        self.assertEqual(page.points_unit, "蝌蚪")
+        self.assertEqual(page.retro_cards, 0)
+        self.assertEqual(page.rank, 3558)
+        self.assertEqual(page.rank_total, 3558)
+        self.assertIn("第 142 次签到", page.message)
+
+    def test_not_signed_today_when_only_background(self):
+        """今天只在补签窗口内、尚未签到 → 必须判为未签到。"""
+        events = ('[{"start":"2026-09-13","display":"background"},'
+                  '{"start":"2026-09-13","title":10},'
+                  '{"start":"2026-09-15","display":"background"}]')
+        page = parse_attendance(self._page(events=events, message=""), fallback_date=TODAY)
+        self.assertFalse(page.signed_today)
+        self.assertEqual(page.site_date, TODAY)
+
+    def test_login_page_detected(self):
+        html = ('<html><head><title>登录</title></head><body>'
+                '<form action="takelogin.php"><input name="username"/></form></body></html>')
+        page = parse_attendance(html, fallback_date=TODAY)
+        self.assertFalse(page.authenticated)
+        self.assertIn("登录状态失效", page.error)
+
+
 class TestSiteProfiles(unittest.TestCase):
     def test_known_sites(self):
         self.assertEqual(get_profile("hhanclub").name, "HHClub")
@@ -263,7 +352,7 @@ class TestSiteProfiles(unittest.TestCase):
 
     def test_list_profiles(self):
         profiles = list_profiles()
-        self.assertEqual({p["key"] for p in profiles}, {"hhanclub", "hdfans"})
+        self.assertEqual({p["key"] for p in profiles}, {"hhanclub", "hdfans", "qingwapt"})
         for p in profiles:
             self.assertTrue(p["default_base_url"].startswith("http"))
 

@@ -319,6 +319,57 @@ class Store:
             ),
         )
 
+    def sync_ledger(self, account_id: int, records: dict[str, Any]) -> tuple[int, int]:
+        """用站点台账**权威地**覆盖同步某个账号的签到日期。
+
+        ``upsert_day`` 用 ``MAX(signed)`` 保证"已签到"不会被瞬时误读抹掉，
+        但也因此无法纠正历史上被误判为已签到的日期。站点台账是权威事实，
+        所以这里额外删除"台账覆盖范围内、本次却未出现"的日期。
+
+        只清理台账窗口 ``[最早日期, 最晚日期]`` 之内，窗口之外的历史保留。
+
+        Args:
+            records: ``{日期: AttendanceRecord}``
+        Returns:
+            ``(同步条数, 清理条数)``
+        """
+        if not records:
+            return 0, 0
+        dates = sorted(records)
+        lo, hi = dates[0], dates[-1]
+
+        existing = {
+            row["check_date"]
+            for row in self._query(
+                "SELECT check_date FROM checkin_days WHERE account_id = ? AND signed = 1 "
+                "AND check_date BETWEEN ? AND ?",
+                (account_id, lo, hi),
+            )
+        }
+        stale = sorted(existing - set(dates))
+        for date_str in stale:
+            self._exec(
+                "DELETE FROM checkin_days WHERE account_id = ? AND check_date = ?",
+                (account_id, date_str),
+            )
+
+        for date_str, record in records.items():
+            self.upsert_day(
+                account_id,
+                date_str,
+                signed=True,
+                points=getattr(record, "points", None),
+                is_retroactive=getattr(record, "is_retroactive", 0) or 0,
+                site_created_at=getattr(record, "created_at", None),
+                source="site",
+            )
+        if stale:
+            log.info(
+                "账号 #%s 台账同步：清理了 %d 个不再属于台账的日期 %s",
+                account_id, len(stale), stale[:5],
+            )
+        return len(records), len(stale)
+
     def get_day(self, account_id: int, check_date: str) -> dict[str, Any] | None:
         row = self._one(
             "SELECT * FROM checkin_days WHERE account_id = ? AND check_date = ?",

@@ -108,6 +108,25 @@ class TestValidateCookie(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("c_secure_pass", reason)
 
+    def test_missing_uid(self):
+        ok, reason = validate_cookie("c_secure_pass=def")
+        self.assertFalse(ok)
+        self.assertIn("c_secure_uid", reason)
+
+    def test_single_session_cookie_is_accepted(self):
+        """新版 / 定制站点用单一会话 Cookie（如 QingWa 的 qw_session）。"""
+        ok, reason = validate_cookie("qw_session=00000000-0000-0000-0000-000000000000")
+        self.assertTrue(ok, reason)
+
+    def test_empty_value_rejected(self):
+        ok, reason = validate_cookie("c_secure_uid=; c_secure_pass=def")
+        self.assertFalse(ok)
+        self.assertIn("空值", reason)
+
+    def test_garbage_rejected(self):
+        ok, _ = validate_cookie("not-a-cookie-at-all")
+        self.assertFalse(ok)
+
     def test_empty(self):
         ok, _ = validate_cookie("")
         self.assertFalse(ok)

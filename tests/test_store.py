@@ -118,6 +118,28 @@ class TestDays(StoreTestCase):
         self.assertEqual(stats["today_pending"], 0)
         self.assertEqual(stats["accounts_enabled"], 1)
 
+    def test_sync_ledger_is_authoritative_within_window(self):
+        """站点台账是权威：窗口内不再出现的日期要被清理，窗口外历史保留。"""
+        from ptcheckin.parser import AttendanceRecord
+
+        self.store.upsert_day(self.aid, "2026-08-24", signed=True)  # 早先被误判为已签到
+        self.store.upsert_day(self.aid, "2026-06-01", signed=True)  # 台账窗口之外
+        records = {
+            "2026-07-15": AttendanceRecord(date="2026-07-15", points=10),
+            "2026-09-15": AttendanceRecord(date="2026-09-15", points=60),
+        }
+        synced, removed = self.store.sync_ledger(self.aid, records)
+        self.assertEqual((synced, removed), (2, 1))
+        self.assertIsNone(self.store.get_day(self.aid, "2026-08-24"))
+        self.assertIsNotNone(self.store.get_day(self.aid, "2026-06-01"), "窗口外历史应保留")
+        self.assertEqual(self.store.get_day(self.aid, "2026-09-15")["points"], 60)
+        self.assertEqual(self.store.get_day(self.aid, "2026-07-15")["signed"], 1)
+
+    def test_sync_ledger_empty_is_noop(self):
+        self.store.upsert_day(self.aid, "2026-09-15", signed=True)
+        self.assertEqual(self.store.sync_ledger(self.aid, {}), (0, 0))
+        self.assertIsNotNone(self.store.get_day(self.aid, "2026-09-15"))
+
 
 class TestStreak(StoreTestCase):
     def setUp(self):

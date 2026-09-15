@@ -53,6 +53,15 @@ SITES: dict[str, SiteProfile] = {
         points_unit="魔力值",
         note="台账内嵌为 FullCalendar events JSON；Cookie 失效时 302 跳转 login.php",
     ),
+    "qingwapt": SiteProfile(
+        key="qingwapt",
+        name="QingWa",
+        default_base_url="https://www.qingwapt.com",
+        attendance_path="attendance.php",
+        referer="index.php",
+        points_unit="蝌蚪",
+        note="会话 Cookie 为单一的 qw_session（非 c_secure_* 形态）；台账同为 FullCalendar events；Cookie 失效时 302 跳转 login.php",
+    ),
 }
 
 DEFAULT_SITE = "hhanclub"
@@ -61,6 +70,8 @@ DEFAULT_SITE = "hhanclub"
 _HOST_ALIASES: tuple[tuple[str, str], ...] = (
     ("hhan", "hhanclub"),
     ("hdfan", "hdfans"),
+    ("qingwa", "qingwapt"),
+    ("frog", "qingwapt"),
 )
 
 

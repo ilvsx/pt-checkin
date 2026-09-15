@@ -96,17 +96,27 @@ def cookie_string_from_dict(data: dict[str, str]) -> str:
 
 
 def validate_cookie(cookie: str) -> tuple[bool, str]:
-    """校验 Cookie 是否像一份有效的 NexusPHP 会话。"""
+    """校验 Cookie 的**形态**是否可用。
+
+    不同站点的会话 Cookie 形态不同，因此这里不假定具体字段名：
+
+    * 旧式 NexusPHP：``c_secure_uid`` + ``c_secure_pass`` 等（HHClub、HDFans）
+    * 新版 / 定制站点：单一会话 Cookie，例如 QingWa 的 ``qw_session=<uuid>``
+
+    Cookie 是否真的有效，只能由站点响应判定（见 ``parser`` 的登录态识别）。
+    """
     cookie = (cookie or "").strip()
     if not cookie:
         return False, "Cookie 为空"
     jar = parse_cookie_string(cookie)
-    missing = [k for k in REQUIRED_COOKIE_KEYS if not jar.get(k)]
-    if missing:
-        return False, f"缺少必要的 Cookie 字段: {', '.join(missing)}"
-    if "c_secure_login" in jar and jar["c_secure_login"].lower() not in ("bm9wzq%3d%3d", "bm9wzq=="):
-        # bm9wZQ%3D%3D / bm9wZQ== 都是 "nope"（正常值），其余值可能是错误状态
-        pass
+    if not jar:
+        return False, "Cookie 格式不正确，应形如 name=value; name2=value2"
+    empty = [key for key, value in jar.items() if not value]
+    if empty:
+        return False, f"Cookie 字段为空值: {', '.join(empty)}"
+    # 旧式 NexusPHP 会话必须成对出现；只有其中一个说明复制不完整
+    if ("c_secure_uid" in jar) != ("c_secure_pass" in jar):
+        return False, "NexusPHP Cookie 不完整：c_secure_uid 与 c_secure_pass 应同时提供"
     return True, "Cookie 格式正常"
 
 
