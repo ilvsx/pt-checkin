@@ -36,8 +36,17 @@ jobs:
 
       - name: CLI 自检
         run: |
+          set -euo pipefail
           python run.py doctor --data /tmp/ptcheckin-ci
+          # 空数据目录下 status 返回非 0 属于预期
           python run.py status --data /tmp/ptcheckin-ci || true
+          # 端到端验证 curl 解析（使用占位符 Cookie）
+          python run.py curl --data /tmp/ptcheckin-ci \
+            "curl 'https://hhanclub.net/attendance.php' -b 'c_secure_uid=MTIzNDU%3D; c_secure_pass=0123456789abcdef0123456789abcdef'" \
+            | grep -q '"cookie_valid": true'
+          # 两种参数顺序都应可用
+          python run.py --data /tmp/ptcheckin-ci doctor > /dev/null
+          echo "✅ CLI 自检通过"
 
   secret-scan:
     name: 敏感信息扫描

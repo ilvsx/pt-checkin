@@ -292,26 +292,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--debug", action="store_true", help="输出调试日志")
     sub = parser.add_subparsers(dest="command")
 
-    p = sub.add_parser("serve", help="启动 Web 界面与定时调度（默认命令）")
+    # 让 --data / --debug 既能写在子命令前，也能写在子命令后。
+    # default=SUPPRESS 保证子解析器不会用默认值覆盖主解析器已解析出的值。
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--data", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    common.add_argument(
+        "--debug", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
+
+    p = sub.add_parser("serve", parents=[common], help="启动 Web 界面与定时调度（默认命令）")
     p.add_argument("--host", help="监听地址")
     p.add_argument("--port", type=int, help="监听端口")
     p.add_argument("--no-scheduler", action="store_true", help="只启动 Web，不启用定时调度")
     p.set_defaults(func=cmd_serve)
 
-    p = sub.add_parser("once", help="立即执行一次签到")
+    p = sub.add_parser("once", parents=[common], help="立即执行一次签到")
     p.add_argument("--account", help="账号名称或 ID，缺省表示全部")
     p.add_argument("--all", action="store_true", help="包含已停用的账号")
     p.add_argument("--no-notify", action="store_true", help="不发送通知")
     p.add_argument("--verbose", action="store_true", help="输出完整结果 JSON")
     p.set_defaults(func=cmd_once)
 
-    p = sub.add_parser("status", help="查看各账号今日签到状态与下次运行时间")
+    p = sub.add_parser("status", parents=[common], help="查看各账号今日签到状态与下次运行时间")
     p.set_defaults(func=cmd_status)
 
-    p = sub.add_parser("accounts", help="列出所有账号")
+    p = sub.add_parser("accounts", parents=[common], help="列出所有账号")
     p.set_defaults(func=cmd_accounts)
 
-    p = sub.add_parser("add", help="添加账号（可用 --curl 直接粘贴浏览器复制内容）")
+    p = sub.add_parser("add", parents=[common], help="添加账号（可用 --curl 直接粘贴浏览器复制内容）")
     p.add_argument("--name", help="账号名称")
     p.add_argument("--url", help="站点地址，例如 https://hhanclub.net")
     p.add_argument("--cookie", help="Cookie 字符串")
@@ -325,18 +333,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-verify", action="store_true", help="添加后不立即校验")
     p.set_defaults(func=cmd_add)
 
-    p = sub.add_parser("remove", help="删除账号")
+    p = sub.add_parser("remove", parents=[common], help="删除账号")
     p.add_argument("--account", required=True, help="账号名称或 ID")
     p.set_defaults(func=cmd_remove)
 
-    p = sub.add_parser("curl", help="解析 curl 文本并打印识别结果")
+    p = sub.add_parser("curl", parents=[common], help="解析 curl 文本并打印识别结果")
     p.add_argument("curl", nargs="?", default="-", help="curl 文本，或 - 从 stdin 读取")
     p.set_defaults(func=cmd_curl)
 
-    p = sub.add_parser("notify-test", help="发送一条测试通知")
+    p = sub.add_parser("notify-test", parents=[common], help="发送一条测试通知")
     p.set_defaults(func=cmd_notify_test)
 
-    p = sub.add_parser("doctor", help="环境自检")
+    p = sub.add_parser("doctor", parents=[common], help="环境自检")
     p.set_defaults(func=cmd_doctor)
     return parser
 
