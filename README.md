@@ -1,5 +1,9 @@
 # PT 站点每日自动签到系统
 
+[![CI](https://github.com/ilvsx/pt-checkin/actions/workflows/ci.yml/badge.svg)](https://github.com/ilvsx/pt-checkin/actions/workflows/ci.yml)
+[![Build and Push Docker Image](https://github.com/ilvsx/pt-checkin/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/ilvsx/pt-checkin/actions/workflows/docker-publish.yml)
+[![ghcr.io](https://img.shields.io/badge/ghcr.io-ilvsx%2Fpt--checkin-blue)](https://github.com/ilvsx/pt-checkin/pkgs/container/pt-checkin)
+
 面向 PT 站（已适配 **HHClub / hhanclub.net**，NexusPHP 系）的完整签到解决方案：
 
 - ⏰ **每日定时自动签到**：按账号设置时间点，带稳定随机延迟，进程重启后不会漂移
@@ -166,13 +170,49 @@ python3 run.py doctor          # 环境自检
 
 ### Docker（推荐）
 
+CI 会自动构建多架构镜像（`linux/amd64` + `linux/arm64`）并推送到 GitHub Container Registry。
+
+**方式一：直接使用预构建镜像**
+
 ```bash
 cd pt-checkin
-docker compose up -d --build
+docker compose pull && docker compose up -d
 # 打开 http://<主机IP>:8787
 ```
 
-数据持久化在 `./data`。对外暴露时请在 `docker-compose.yml` 里设置 `PTCHECKIN_TOKEN`。
+**方式二：本地自行构建**（不依赖 GHCR）
+
+```bash
+cd pt-checkin
+docker compose up -d --build
+```
+
+也可以不用 compose：
+
+```bash
+docker run -d --name pt-checkin --restart unless-stopped \
+  -p 8787:8787 \
+  -v "$PWD/data:/data" \
+  -e TZ=Asia/Shanghai \
+  -e PTCHECKIN_TOKEN=change-me \
+  ghcr.io/ilvsx/pt-checkin:latest
+```
+
+数据持久化在 `./data`。对外暴露时请设置 `PTCHECKIN_TOKEN`（compose 里取消注释即可）。
+
+> **首次使用 GHCR 镜像注意**：Actions 推送的包默认是 **私有** 的。若希望匿名拉取，
+> 请到 GitHub 仓库右侧 **Packages → pt-checkin → Package settings → Change visibility**
+> 改为 Public；否则需要先 `docker login ghcr.io` 再拉取。
+
+**可用标签**
+
+| 标签 | 说明 |
+| --- | --- |
+| `latest` | main 分支最新构建 |
+| `main` | main 分支 |
+| `sha-xxxxxxx` | 对应提交的短 SHA |
+| `1.2.3` / `1.2` / `1` | 推送 `v1.2.3` 这类 tag 时自动生成 |
+| `pr-N` | PR 构建（仅验证，不推送） |
 
 ### systemd
 
@@ -239,7 +279,10 @@ data/
 pt-checkin/
 ├── run.py                    # 入口
 ├── requirements.txt           # 仅可选依赖（cryptography）
-├── Dockerfile / docker-compose.yml
+├── Dockerfile / docker-compose.yml / .dockerignore
+├── .github/workflows/
+│   ├── ci.yml                 # 单元测试矩阵 + 敏感信息扫描
+│   └── docker-publish.yml     # 构建多架构镜像并推送到 GHCR
 ├── deploy/pt-checkin.service  # systemd 单元
 ├── ptcheckin/
 │   ├── cli.py                 # 命令行
@@ -268,6 +311,9 @@ python3 -m unittest discover -s tests -t .
 覆盖：页面解析（含字符串内花括号、未登录页、结构变化兜底）、curl 解析（使用真实抓包）、
 持久层（加密、台账、连续天数、分页、清理）、签到流程（成功/已签到/失败/失效/网络错误/并发保护）、
 调度逻辑（定时、随机延迟、重试、上限、补签）。
+
+CI（`.github/workflows/ci.yml`）会在 Python 3.10 / 3.11 / 3.12 上跑同一套测试，
+并附带一道**敏感信息扫描**：一旦有 `data/`、`secret.key` 或真实 Cookie 被提交，CI 会直接失败。
 
 ---
 

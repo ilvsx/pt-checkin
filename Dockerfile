@@ -11,6 +11,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+LABEL org.opencontainers.image.title="pt-checkin" \
+      org.opencontainers.image.description="PT 站点每日自动签到系统（HHClub / NexusPHP）：定时签到、记录查询、精确判定当日状态" \
+      org.opencontainers.image.source="https://github.com/ilvsx/pt-checkin" \
+      org.opencontainers.image.url="https://github.com/ilvsx/pt-checkin"
+
 # 可选依赖：失败也不影响构建（程序会自动退化为仅混淆存储）
 RUN pip install --no-cache-dir cryptography || true
 

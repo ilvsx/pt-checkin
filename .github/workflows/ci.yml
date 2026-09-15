@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 单元测试 (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 安装可选依赖 (cryptography)
+        run: python -m pip install --upgrade pip cryptography
+
+      - name: 运行单元测试
+        run: python -m unittest discover -s tests -t . -v
+
+      - name: CLI 自检
+        run: |
+          python run.py doctor --data /tmp/ptcheckin-ci
+          python run.py status --data /tmp/ptcheckin-ci || true
+
+  secret-scan:
+    name: 敏感信息扫描
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 确认 data/ 与密钥未被提交
+        run: |
+          set -euo pipefail
+          fail=0
+          if git ls-files | grep -qE '^(data/|\.probe/)'; then
+            echo "::error::data/ 或 .probe/ 下的文件被提交了，其中包含 Cookie 与加密密钥"
+            git ls-files | grep -E '^(data/|\.probe/)'
+            fail=1
+          fi
+          if git ls-files | grep -qE 'secret\.key$|\.db$|\.db-wal$'; then
+            echo "::error::发现被提交的密钥或数据库文件"
+            git ls-files | grep -E 'secret\.key$|\.db$|\.db-wal$'
+            fail=1
+          fi
+          exit $fail
+
+      - name: 扫描硬编码的真实 Cookie
+        run: |
+          set -euo pipefail
+          # 只放行明确已知的占位符；真实值一旦出现立即失败
+          allow_pass='0123456789abcdef0123456789abcdef'
+          allow_uid='MTIzNDU%3D'
+          fail=0
+
+          echo "── c_secure_pass（真实值为 32 位十六进制）──"
+          while read -r v; do
+            [ -z "$v" ] && continue
+            if [ "$v" != "$allow_pass" ]; then
+              echo "::error::疑似真实 c_secure_pass: $v"
+              fail=1
+            fi
+          done < <(grep -rhoE 'c_secure_pass=[0-9a-fA-F]{32}' \
+                     --exclude-dir=.git --exclude-dir=.github --exclude-dir=__pycache__ -I . | cut -d= -f2 | sort -u)
+
+          echo "── c_secure_uid（真实值为 URL 编码的 base64，长度 ≥ 8）──"
+          while read -r v; do
+            [ -z "$v" ] && continue
+            if [ "$v" != "$allow_uid" ]; then
+              echo "::error::疑似真实 c_secure_uid: $v"
+              fail=1
+            fi
+          done < <(grep -rhoE 'c_secure_uid=[A-Za-z0-9%+/=]{8,}' \
+                     --exclude-dir=.git --exclude-dir=.github --exclude-dir=__pycache__ -I . | cut -d= -f2 | sort -u)
+
+          if [ "$fail" -ne 0 ]; then
+            echo "请改用占位符，并确认未把真实 Cookie 提交进仓库。"
+            exit 1
+          fi
+          echo "✅ 未发现硬编码的真实 Cookie"

@@ -1,7 +1,11 @@
 services:
   pt-checkin:
-    build: .
-    image: pt-checkin:latest
+    # CI 构建好的多架构镜像（linux/amd64 + linux/arm64）
+    #   使用预构建镜像：docker compose pull && docker compose up -d
+    #   本地自行构建：  docker compose up -d --build
+    image: ghcr.io/ilvsx/pt-checkin:latest
+    build:
+      context: .
     container_name: pt-checkin
     restart: unless-stopped
     ports:

@@ -1,0 +1,22 @@
+# Docker 构建上下文排除项
+# 注意：data/ 内含 Cookie 加密密钥与数据库，绝不能进入构建上下文
+.git
+.github
+data
+.probe
+
+# Python 产物
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# 镜像内不需要的文件（Dockerfile 未 COPY 它们）
+tests/
+deploy/
+docker-compose.yml
+README.md
+.dockerignore
