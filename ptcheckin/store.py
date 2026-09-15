@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS checkin_attempts (
     http_status   INTEGER,
     duration_ms   INTEGER,
     points        INTEGER,
+    points_unit   TEXT,
     streak        INTEGER,
     total_count   INTEGER,
     rank          INTEGER,
@@ -84,6 +85,12 @@ CREATE TABLE IF NOT EXISTS kv (
     value TEXT
 );
 """
+
+
+# 后续新增的列：对既有数据库做幂等迁移（见 Store._migrate）
+MIGRATIONS: dict[str, dict[str, str]] = {
+    "checkin_attempts": {"points_unit": "TEXT"},
+}
 
 
 def utcnow() -> datetime:
@@ -121,7 +128,17 @@ class Store:
         with self._lock:
             self.conn.executescript(SCHEMA)
             self.conn.commit()
+        self._migrate()
         self._harden_permissions()
+
+    def _migrate(self) -> None:
+        """轻量迁移：给既有数据库补上后加的列（幂等）。"""
+        for table, columns in MIGRATIONS.items():
+            existing = {row["name"] for row in self._query(f"PRAGMA table_info({table})")}
+            for column, decl in columns.items():
+                if column not in existing:
+                    self._exec(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+                    log.info("数据库迁移：%s 新增列 %s", table, column)
 
     def _harden_permissions(self) -> None:
         """数据库内含 Cookie 密文，限制为仅属主可读写。"""
@@ -333,12 +350,21 @@ class Store:
             )
         ]
 
-    def signed_dates(self, account_id: int, date_from: str, date_to: str) -> set[str]:
-        rows = self._query(
+    def signed_dates(
+        self, account_id: int, date_from: str, date_to: str, exclude_retroactive: bool = True
+    ) -> set[str]:
+        """已签到的日期集合。
+
+        默认排除补签（``is_retroactive=1``）：站点计算"连续签到"时不计补签
+        （实测补签次日连续奖励会重置），因此本地推算必须保持一致。
+        """
+        sql = (
             "SELECT check_date FROM checkin_days WHERE account_id = ? AND signed = 1 "
-            "AND check_date BETWEEN ? AND ?",
-            (account_id, date_from, date_to),
+            "AND check_date BETWEEN ? AND ?"
         )
+        if exclude_retroactive:
+            sql += " AND COALESCE(is_retroactive, 0) = 0"
+        rows = self._query(sql, (account_id, date_from, date_to))
         return {r["check_date"] for r in rows}
 
     def compute_streak(self, account_id: int, today: str, lookback_days: int = 400) -> int:
@@ -365,7 +391,7 @@ class Store:
     def add_attempt(self, data: dict[str, Any]) -> int:
         cols = [
             "account_id", "account_name", "check_date", "trigger", "status", "is_new",
-            "http_status", "duration_ms", "points", "streak", "total_count", "rank",
+            "http_status", "duration_ms", "points", "points_unit", "streak", "total_count", "rank",
             "rank_total", "retro_cards", "message", "error", "site_date", "started_at",
             "finished_at", "raw_snippet",
         ]

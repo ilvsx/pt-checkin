@@ -150,6 +150,30 @@ class TestStreak(StoreTestCase):
     def test_no_records(self):
         self.assertEqual(self.store.compute_streak(self.aid, "2026-09-15"), 0)
 
+    def test_retroactive_day_breaks_streak(self):
+        """补签（is_retroactive=1）不计入连续签到，且会中断连续。"""
+        today = date(2026, 9, 15)
+        for i in range(3):  # 09-15 / 09-14 / 09-13 正常签到
+            self._mark(today - timedelta(days=i))
+        self.store.upsert_day(
+            self.aid, (today - timedelta(days=3)).isoformat(), signed=True, is_retroactive=1
+        )
+        self._mark(today - timedelta(days=4))  # 09-11 正常签到
+        self.assertEqual(self.store.compute_streak(self.aid, today.isoformat()), 3)
+
+    def test_signed_dates_filter_for_retroactive(self):
+        today = date(2026, 9, 15)
+        self.store.upsert_day(self.aid, today.isoformat(), signed=True, is_retroactive=1)
+        self.assertEqual(
+            self.store.signed_dates(self.aid, today.isoformat(), today.isoformat()), set()
+        )
+        self.assertEqual(
+            self.store.signed_dates(
+                self.aid, today.isoformat(), today.isoformat(), exclude_retroactive=False
+            ),
+            {today.isoformat()},
+        )
+
 
 class TestAttempts(StoreTestCase):
     def setUp(self):

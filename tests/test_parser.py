@@ -92,7 +92,8 @@ class TestExtract(unittest.TestCase):
         self.assertIsNone(extract_now_date(ANON_PAGE))
 
     def test_extract_ledger(self):
-        records = extract_ledger(build_page())
+        records, fmt = extract_ledger(build_page())
+        self.assertEqual(fmt, "object")
         self.assertEqual(len(records), 3)
         rec = records["2026-09-15"]
         self.assertEqual(rec.points, 125)
@@ -101,14 +102,14 @@ class TestExtract(unittest.TestCase):
         self.assertEqual(rec.date, "2026-09-15")
 
     def test_extract_ledger_empty_object(self):
-        self.assertEqual(extract_ledger(build_page(ledger="{}")), {})
+        self.assertEqual(extract_ledger(build_page(ledger="{}"))[0], {})
 
     def test_extract_ledger_array(self):
-        self.assertEqual(extract_ledger(build_page(ledger="[]")), {})
+        self.assertEqual(extract_ledger(build_page(ledger="[]"))[0], {})
 
     def test_extract_ledger_ignores_unrelated_json(self):
         page = build_page() + '<script>let other = {"foo": {"bar": 1}};</script>'
-        self.assertEqual(len(extract_ledger(page)), 3)
+        self.assertEqual(len(extract_ledger(page)[0]), 3)
 
     def test_extract_ledger_survives_braces_inside_values(self):
         ledger = (
@@ -116,7 +117,7 @@ class TestExtract(unittest.TestCase):
             '"is_retroactive":0,"created_at":"2026-09-15 00:01:02",'
             '"updated_at":"2026-09-15 00:01:02","note":"包含 } 与 { 的字符串"}}'
         )
-        records = extract_ledger(build_page(ledger=ledger))
+        records = extract_ledger(build_page(ledger=ledger))[0]
         self.assertEqual(records["2026-09-15"].points, 5)
 
     def test_extract_message(self):

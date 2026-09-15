@@ -4,7 +4,7 @@
 [![Build and Push Docker Image](https://github.com/ilvsx/pt-checkin/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/ilvsx/pt-checkin/actions/workflows/docker-publish.yml)
 [![ghcr.io](https://img.shields.io/badge/ghcr.io-ilvsx%2Fpt--checkin-blue)](https://github.com/ilvsx/pt-checkin/pkgs/container/pt-checkin)
 
-面向 PT 站（已适配 **HHClub / hhanclub.net**，NexusPHP 系）的完整签到解决方案：
+面向 PT 站（已适配 **HHClub / hhanclub.net** 与 **HDFans / hdfans.org**，NexusPHP 系）的完整签到解决方案：
 
 - ⏰ **每日定时自动签到**：按账号设置时间点，带稳定随机延迟，进程重启后不会漂移
 - 📊 **签到记录可查**：每次尝试的完整审计（状态、获得积分、连续天数、排名、耗时、错误原因）
@@ -17,7 +17,10 @@
 
 ## 1. 它是如何"准确判断今天有没有签到"的
 
-这是本项目的核心。抓包分析 `attendance.php` 后发现，HHClub 的签到页在 HTML 里内嵌了两段**机器可读**的数据：
+这是本项目的核心。抓包分析后发现，不同站点的签到页都会在 HTML 里内嵌**机器可读**的签到台账，
+只是格式不同。解析器会**自动识别**两种格式，并统一给出日期级别的确定性判断。
+
+### 格式 A：对象台账（HHClub）
 
 ```javascript
 // ① 站点认定的"今天"
@@ -32,23 +35,57 @@ let data = {"2026-09-14":{"id":5795223,"uid":12345,"points":120,"date":"2026-09-
 
 因此判断逻辑是确定的：
 
-> **`nowDate` 格式化成的日期，是否存在于台账 `data` 中。**
+> **站点认定的"今天"，是否存在于台账中。**
+
+### 格式 B：日历事件台账（HDFans）
+
+```javascript
+let events = JSON.parse('[{"start":"2026-09-15","display":"background"},
+                          {"start":"2026-09-15","title":60}, ...]');
+```
+
+**只要日期出现即算已签到**（有些日期只有背景事件、没有 `title`）。
+进一步地，只有背景事件而没有积分的日期是**补签**：
+
+> 实测依据：每个这类日期之后，连续签到奖励都会重置回 10
+> （`09-08` 得 100 → `09-09` 无积分 → `09-10` 得 10）。
+> 因此这类日期被标记为 `is_retroactive=1`，既不计积分，也不计入连续天数。
+
+**站点日期的取值优先级**（很关键）：
+
+1. 页面自报的 `nowDate`（HHClub 提供）
+2. 账号时区的今天（HDFans 等不提供的站点）
+3. 台账中最大的日期 —— **仅在拿不到前两者时才用**
+
+第 3 条绝不能优先：若今天尚未签到，台账最大日期会是"上次签到的日期"，
+于是"今天"指向过去、`signed_today` 恒为真，**调度器将永远不会签到**。
 
 配套的判定细节：
 
 | 场景 | 判定依据 |
 | --- | --- |
-| 今日已签到 | `nowDate` 是 `data` 的键，且站点 `created_at` **早于**本次请求（说明不是本次签的） |
-| 本次签到成功 | `nowDate` 是 `data` 的键，且 `created_at` 落在本次请求时间附近，且本地此前无今日记录 |
+| 今日已签到 | 今天在台账里，且站点 `created_at` **早于**本次请求（说明不是本次签的） |
+| 本次签到成功 | 今天在台账里，且 `created_at` 落在本次请求附近，且本地此前无今日记录 |
 | 签到未生效 | 页面正常登录，但台账中**没有**今天 → 判为失败并重试 |
-| Cookie 失效 | 页面返回 HTTP 200 但被截断、不含 `nowDate` / 台账 → 判为 `auth_failed` |
+| Cookie 失效 | HHClub：HTTP 200 但被截断、不含台账；HDFans：302 跳转 `login.php` |
 
-**关键前提**：在 HHClub 上 `GET /attendance.php` 本身就是签到动作，且**对同一天幂等** ——
-已签到时会原样回显当日结果，不会重复签到、不会重复计分。所以"查询状态"和"执行签到"
-是同一个请求，反复调用是安全的。
+**关键前提**：在 HHClub 与 HDFans 上，`GET /attendance.php` 本身就是签到动作，且**对同一天幂等**
+（实测第二次请求返回的第 N 次、连续天数、积分完全不变，不会重复签到或重复计分）。
+所以"查询状态"和"执行签到"是同一个请求，反复调用是安全的。
 
-此外还有文本兜底：`这是您的第24次签到，已连续签到24天，本次签到获得125个憨豆`
-与 `今日签到排名：1234 / 5678`，在台账结构变化时仍可工作。
+此外还有文本兜底：`这是您的第 192 次签到，已连续签到 6 天，本次签到获得 60 个魔力值`
+与 `今日签到排名：7898 / 8732`。积分单位（憨豆 / 魔力值 / 积分）自动识别，
+无需为每个站点单独配置解析规则。
+
+### 已适配站点
+
+| 站点 | 地址 | 台账格式 | 积分单位 |
+| --- | --- | --- | --- |
+| **HHClub** | hhanclub.net | 对象台账（`let data`） | 憨豆 |
+| **HDFans** | hdfans.org | 日历事件（`let events`） | 魔力值 |
+
+同为 NexusPHP 的其他站点通常也能直接使用：添加账号时按主机名自动识别，
+未收录的站点会按通用规则处理。
 
 ---
 
@@ -68,22 +105,23 @@ python3 run.py
 **方式 A：粘贴 cURL（推荐）**
 
 在浏览器中登录 PT 站 → F12 → Network → 点击签到按钮 → 右键该请求 → Copy as cURL，
-粘贴到界面的「① 粘贴 cURL」框，点「解析并填入」，站点地址、Cookie、User-Agent 会自动识别。
+粘贴到界面的「① 粘贴 cURL」框，点「解析并填入」，**站点、站点地址、Cookie、User-Agent
+会自动识别**（例如粘贴 hdfans.org 的内容会自动选中 HDFans 并显示其积分单位）。
 
 **方式 B：命令行**
 
 ```bash
 python3 run.py add --curl - --name 'HHClub 主号' < 抓包内容.txt
 
-# 或手动指定
-python3 run.py add --name 'HHClub 主号' \
-  --url https://hhanclub.net \
+# 或手动指定（--site 可省略，会按地址自动识别）
+python3 run.py add --name 'HDFans 主号' \
+  --url https://hdfans.org \
   --cookie 'c_secure_uid=...; c_secure_pass=...; c_secure_login=...'
 ```
 
-添加时会立即校验 Cookie 并把站点近一个月的签到台账同步到本地。
+添加时会立即校验 Cookie 并把站点的签到台账（HDFans 约两个月）同步到本地。
 
-> Cookie 获取位置：浏览器 F12 → Application → Cookies → `hhanclub.net`，
+> Cookie 获取位置：浏览器 F12 → Application → Cookies → 对应站点域名，
 > 复制 `c_secure_uid`、`c_secure_pass`、`c_secure_ssl`、`c_secure_tracker_ssl`、`c_secure_login` 五个字段。
 
 ### 2.3 命令行速查
@@ -295,8 +333,9 @@ pt-checkin/
 │   ├── curlparse.py           # curl 抓包解析
 │   ├── notify.py              # 通知渠道
 │   ├── secretsbox.py          # Cookie 加密
+│   ├── sites.py               # 站点档案（接口路径 / Referer / 积分单位）
 │   └── web/                   # Web 服务 + 前端（原生 JS）
-└── tests/                     # 98 个单元测试
+└── tests/                     # 130 个单元测试
 ```
 
 ---
@@ -308,9 +347,10 @@ cd pt-checkin
 python3 -m unittest discover -s tests -t .
 ```
 
-覆盖：页面解析（含字符串内花括号、未登录页、结构变化兜底）、curl 解析（使用真实抓包）、
-持久层（加密、台账、连续天数、分页、清理）、签到流程（成功/已签到/失败/失效/网络错误/并发保护）、
-调度逻辑（定时、随机延迟、重试、上限、补签）。
+覆盖：页面解析（对象台账 / 日历事件台账两种格式、字符串内花括号、未登录页、结构变化兜底）、
+多站点兼容（站点识别、补签判定、连续天数对齐、Cookie 失效时的 302 跳转）、
+curl 解析、持久层（加密、台账、连续天数、补签排除、分页、清理）、
+签到流程（成功/已签到/失败/失效/网络错误/并发保护）、调度逻辑（定时、随机延迟、重试、上限、补签）。
 
 CI（`.github/workflows/ci.yml`）会在 Python 3.10 / 3.11 / 3.12 上跑同一套测试，
 并附带一道**敏感信息扫描**：一旦有 `data/`、`secret.key` 或真实 Cookie 被提交，CI 会直接失败。

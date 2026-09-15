@@ -13,6 +13,7 @@ from .client import SiteClient, parse_cookie_string, validate_cookie
 from .logutil import get_logger
 from .notify import Notifier
 from .parser import AttendancePage, parse_attendance
+from .sites import get_profile
 from .store import Store, iso, utcnow
 
 log = get_logger("checkin")
@@ -42,6 +43,7 @@ class CheckResult:
     site_date: str | None = None
     check_date: str | None = None
     points: int | None = None
+    points_unit: str | None = None
     streak: int | None = None
     total_count: int | None = None
     rank: int | None = None
@@ -164,6 +166,7 @@ class CheckinService:
             result.finished_at = iso()
             return self._finalize(result, account, notify=notify)
 
+        profile = get_profile(account.get("site"))
         client = SiteClient(
             account["base_url"],
             cookie,
@@ -172,6 +175,8 @@ class CheckinService:
             timeout=float(self.settings.get("request_timeout", 30)),
             verify_ssl=bool(self.settings.get("verify_ssl", True)),
             proxy=str(self.settings.get("proxy") or ""),
+            attendance_path=profile.attendance_path,
+            referer=profile.referer,
         )
 
         response = client.attendance()
@@ -185,7 +190,7 @@ class CheckinService:
             return self._finalize(result, account, notify=notify)
 
         fallback_date = started_local.strftime("%Y-%m-%d")
-        page = parse_attendance(response.text, fallback_date=fallback_date)
+        page = parse_attendance(response.text, fallback_date=fallback_date, site=profile.key)
 
         if not page.authenticated:
             result.status = "auth_failed"
@@ -202,6 +207,7 @@ class CheckinService:
         result.total_count = page.total_count
         result.streak = page.streak
         result.points = page.points
+        result.points_unit = page.points_unit or profile.points_unit
         result.retro_cards = page.retro_cards
         result.rank = page.rank
         result.rank_total = page.rank_total
@@ -309,6 +315,7 @@ class CheckinService:
                 "http_status": result.http_status,
                 "duration_ms": result.duration_ms,
                 "points": result.points,
+                "points_unit": result.points_unit,
                 "streak": result.streak,
                 "total_count": result.total_count,
                 "rank": result.rank,

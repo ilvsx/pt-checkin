@@ -17,6 +17,7 @@ from .notify import Notifier
 from .scheduler import Scheduler, parse_hhmm
 from .secretsbox import SecretsBox
 from .settings import Settings
+from .sites import guess_site
 from .store import Store, utcnow
 
 
@@ -143,8 +144,12 @@ def cmd_status(args: argparse.Namespace) -> int:
         else:
             label = "pending"
         nxt = plan.get("next_run_at") or ""
+        # 连续天数优先用站点自报值，缺失时按本地台账推算
+        streak = day.get("streak")
+        if streak is None:
+            streak = store.compute_streak(int(acct["id"]), today)
         print(f"{acct['id']:<4} {acct['name'][:17]:<18} {_fmt_status(label):<14} "
-              f"{str(day.get('points') or '-'):<6} {str(store.compute_streak(int(acct['id']), today)) + '天':<5} "
+              f"{str(day.get('points') or '-'):<6} {str(streak) + '天':<5} "
               f"{nxt[:19]:<20} {acct.get('note') or ''}")
     store.close()
     return 0
@@ -202,7 +207,7 @@ def cmd_add(args: argparse.Namespace) -> int:
 
     account = store.create_account({
         "name": name,
-        "site": "hhanclub" if "hhanclub" in base_url else base_url,
+        "site": guess_site(base_url),
         "base_url": base_url,
         "cookie": cookie,
         "user_agent": user_agent,

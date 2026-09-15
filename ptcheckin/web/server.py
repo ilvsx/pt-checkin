@@ -23,6 +23,7 @@ from ..logutil import get_logger
 from ..notify import Notifier
 from ..parser import normalize_date
 from ..scheduler import Scheduler, parse_hhmm, stable_jitter
+from ..sites import get_profile, guess_site, is_known_site, list_profiles
 from ..store import Store, iso, utcnow
 
 log = get_logger("web")
@@ -91,6 +92,7 @@ class Api:
             last["view_status"], last["view_label"] = last_status
             last["notifications"] = []
 
+        profile = get_profile(account.get("site"))
         out = dict(account)
         out.update(
             {
@@ -98,10 +100,12 @@ class Api:
                 "today_signed": bool(day.get("signed")),
                 "today_points": day.get("points"),
                 "today_site_created_at": day.get("site_created_at"),
-                "streak": self.store.compute_streak(int(account["id"]), today),
+                "streak": self._streak_for(int(account["id"]), today, day),
                 "total_signed": self._total_signed(int(account["id"])),
                 "view_status": view_status,
                 "view_label": view_label,
+                "site_name": profile.name,
+                "points_unit": profile.points_unit,
                 "plan": plan,
                 "next_run_at": plan.get("next_run_at"),
                 "last_attempt": last,
@@ -109,6 +113,16 @@ class Api:
             }
         )
         return out
+
+    def _streak_for(self, account_id: int, today: str, day: dict[str, Any] | None) -> int:
+        """连续签到天数：优先用站点自报值，缺失时按本地台账推算。
+
+        站点值最权威（HDFans 的补签不计入连续天数，本地推算已与之对齐，
+        但站点值仍可能出现我们尚未同步的规则细节）。
+        """
+        if day and day.get("streak") is not None:
+            return int(day["streak"])
+        return self.store.compute_streak(account_id, today)
 
     def _total_signed(self, account_id: int) -> int:
         rows = self.store._query(  # noqa: SLF001 - 同包内部使用
@@ -134,8 +148,11 @@ class Api:
             "stats": self.store.stats(today),
             "accounts": accounts,
             "scheduler": self.scheduler.status(),
-            "site": {"key": "hhanclub", "name": "HHClub", "checkin_path": "attendance.php"},
+            "sites": list_profiles(),
         }
+
+    def sites(self) -> dict[str, Any]:
+        return {"sites": list_profiles()}
 
     def _tz(self) -> ZoneInfo:
         try:
@@ -401,7 +418,13 @@ class Api:
         if "name" in payload:
             data["name"] = (payload.get("name") or "").strip()
         if "site" in payload:
-            data["site"] = (payload.get("site") or "hhanclub").strip()
+            site = (payload.get("site") or "").strip()
+            if site and not is_known_site(site):
+                raise ApiError(
+                    "不支持的站点: %s（当前支持 %s）"
+                    % (site, "、".join(p["key"] for p in list_profiles()))
+                )
+            data["site"] = site or None
         if "base_url" in payload:
             base_url = (payload.get("base_url") or "").strip().rstrip("/")
             if base_url and not base_url.startswith(("http://", "https://")):
@@ -444,6 +467,12 @@ class Api:
             data["user_agent"] = (payload.get("user_agent") or "").strip() or None
         if "extra_headers" in payload and isinstance(payload["extra_headers"], dict):
             data["extra_headers"] = payload["extra_headers"]
+
+        # 未显式指定站点时，按站点地址自动推断（例如 hdfans.org → hdfans）
+        if not data.get("site") and data.get("base_url"):
+            data["site"] = guess_site(data["base_url"])
+            if not is_known_site(data["site"]):
+                log.warning("站点 %s 未被显式支持，将按通用 NexusPHP 规则处理", data["base_url"])
 
         if for_create:
             data.setdefault("enabled", True)
@@ -588,6 +617,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/health":
             return {"ok": True, "time": iso(), "version": _version()}
+
+        if path == "/api/sites" and method == "GET":
+            return api.sites()
 
         if path == "/api/overview" and method == "GET":
             return api.overview()

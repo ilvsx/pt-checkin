@@ -56,10 +56,10 @@ def shell_split(text: str) -> list[str]:
 
 
 def _guess_site(base_url: str) -> str:
-    host = urllib.parse.urlparse(base_url).netloc.lower()
-    if "hhanclub" in host:
-        return "hhanclub"
-    return host.split(":")[0] or "unknown"
+    """按主机名识别站点（见 sites.py 的站点档案）。"""
+    from .sites import guess_site
+
+    return guess_site(base_url)
 
 
 def parse_curl(text: str) -> dict[str, Any]:

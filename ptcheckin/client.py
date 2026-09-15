@@ -123,6 +123,8 @@ class SiteClient:
         timeout: float = 30,
         verify_ssl: bool = True,
         proxy: str = "",
+        attendance_path: str = "attendance.php",
+        referer: str = "index.php",
     ):
         self.base_url = (base_url or "").rstrip("/")
         self.cookie = (cookie or "").strip()
@@ -131,6 +133,9 @@ class SiteClient:
         self.timeout = timeout
         self.verify_ssl = verify_ssl
         self.proxy = proxy
+        # 站点差异：签到接口路径与 Referer（见 sites.py 的站点档案）
+        self.attendance_path = attendance_path or "attendance.php"
+        self.referer = referer or "index.php"
         self._opener = self._build_opener()
 
     # ------------------------------------------------------------- opener
@@ -241,14 +246,14 @@ class SiteClient:
 
     # ------------------------------------------------------------ helpers
     def attendance(self, timeout: float | None = None) -> HttpResponse:
-        """访问 attendance.php。
+        """访问签到接口。
 
-        注意：在 HHClub 上该 GET 请求本身就是签到动作，且对同一天幂等 ——
-        已签到时会原样返回当日结果，不会重复签到。
+        注意：在 HHClub 与 HDFans 上，该 GET 请求本身就是签到动作，
+        且对同一天幂等 —— 已签到时会原样返回当日结果，不会重复签到。
         """
         return self.request(
-            "attendance.php",
-            referer=f"{self.base_url}/mybonus.php",
+            self.attendance_path,
+            referer=f"{self.base_url}/{self.referer.lstrip('/')}",
             timeout=timeout,
         )
 

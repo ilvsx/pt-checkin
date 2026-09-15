@@ -105,7 +105,8 @@ function renderOverview() {
   const ov = state.overview;
   if (!ov) return;
   const s = ov.stats;
-  $('#site-label').textContent = `${ov.site.name} · ${ov.site.checkin_path} · ${ov.timezone}`;
+  const siteNames = (ov.sites || []).map((x) => x.name).join(' / ');
+  $('#site-label').textContent = `${siteNames || '—'} · ${ov.timezone}`;
   $('#stat-grid').innerHTML = [
     stat('账号 / 启用', `${s.accounts_total} / ${s.accounts_enabled}`, ''),
     stat('今日已签到', s.today_signed, 'ok'),
@@ -150,13 +151,13 @@ function renderAccountCard(a) {
   <div class="account-card ${a.view_status}">
     <div class="ac-head">
       <div>
-        <div class="ac-name">${esc(a.name)}</div>
+        <div class="ac-name">${esc(a.name)} <span class="site-tag">${esc(a.site_name || a.site)}</span></div>
         <div class="ac-url">${esc(a.base_url)}</div>
       </div>
       <div class="badge ${a.view_status}">${esc(a.view_label)}</div>
     </div>
     <div class="ac-metrics">
-      <div class="metric"><div class="k">今日获得</div><div class="v">${a.today_points ?? '—'}</div></div>
+      <div class="metric"><div class="k">今日获得${a.points_unit ? '（' + esc(a.points_unit) + '）' : ''}</div><div class="v">${a.today_points ?? '—'}</div></div>
       <div class="metric"><div class="k">连续签到</div><div class="v">${a.streak ?? 0} 天</div></div>
       <div class="metric"><div class="k">累计签到</div><div class="v">${a.total_signed ?? 0} 次</div></div>
       <div class="metric"><div class="k">失败次数</div><div class="v">${plan.failures ?? 0}</div></div>
@@ -266,8 +267,13 @@ function openAccountModal(account) {
     </div>
     <hr style="border:0;border-top:1px solid var(--border);margin:18px 0"/>
     <div class="grid-2">
+      <div class="field"><label>站点</label><select id="ac-site"></select></div>
       <div class="field"><label>账号名称</label><input id="ac-name" value="${esc(account?.name || '')}" placeholder="例如 HHClub 主号"/></div>
-      <div class="field"><label>站点地址</label><input id="ac-url" value="${esc(account?.base_url || 'https://hhanclub.net')}"/></div>
+    </div>
+    <div class="field">
+      <label>站点地址</label>
+      <input id="ac-url" value="${esc(account?.base_url || '')}"/>
+      <div class="hint" id="ac-site-hint"></div>
     </div>
     <div class="field">
       <label>Cookie${isEdit ? '（留空表示不修改）' : ''}</label>
@@ -293,6 +299,32 @@ function openAccountModal(account) {
 
   $('#ac-cancel').addEventListener('click', close);
 
+  /* ---- 站点选择：切换时同步默认地址与积分单位提示 ---- */
+  const sites = state.overview?.sites || [];
+  const siteSelect = $('#ac-site');
+  siteSelect.innerHTML = sites
+    .map((x) => `<option value="${esc(x.key)}">${esc(x.name)}</option>`)
+    .join('');
+  if (!sites.length) siteSelect.innerHTML = '<option value="hhanclub">HHClub</option>';
+
+  function syncSiteHint(prefillUrl) {
+    const chosen = sites.find((x) => x.key === siteSelect.value);
+    if (prefillUrl && chosen?.default_base_url) $('#ac-url').value = chosen.default_base_url;
+    $('#ac-site-hint').textContent = chosen
+      ? `签到接口：${chosen.attendance_path} · 积分单位：${chosen.points_unit}`
+      : '';
+  }
+
+  // 编辑既有账号时用其站点；新增时按已填地址推断，否则用第一个站点
+  if (account?.site) {
+    siteSelect.value = account.site;
+  } else if (sites.length) {
+    const guessed = sites.find((x) => x.default_base_url === $('#ac-url').value.trim());
+    siteSelect.value = (guessed || sites[0]).key;
+  }
+  syncSiteHint(!isEdit && !$('#ac-url').value.trim());
+  siteSelect.addEventListener('change', () => syncSiteHint(true));
+
   $('#ac-parse').addEventListener('click', async () => {
     const curl = $('#ac-curl').value.trim();
     if (!curl) { toast('请先粘贴 cURL', 'warn'); return; }
@@ -304,8 +336,13 @@ function openAccountModal(account) {
       const p = res.parsed || {};
       if (p.base_url) $('#ac-url').value = p.base_url;
       if (p.user_agent) $('#ac-ua').value = p.user_agent;
-      if (p.site && !$('#ac-name').value) $('#ac-name').value = p.site.toUpperCase();
       if (p.cookie_full) $('#ac-cookie').value = p.cookie_full;
+      // 按识别出的地址切换站点
+      if (p.site) {
+        const matched = sites.find((x) => x.key === p.site);
+        if (matched) { siteSelect.value = matched.key; syncSiteHint(false); }
+        if (!$('#ac-name').value) $('#ac-name').value = (matched || {}).name || p.site.toUpperCase();
+      }
 
       $('#ac-preview').innerHTML = `<div class="preview ${p.cookie_valid ? 'ok' : 'bad'}">` +
         `${p.cookie_valid ? '✅ Cookie 格式正常' : '❌ ' + esc(p.cookie_check)}\n` +
@@ -324,6 +361,7 @@ function openAccountModal(account) {
     const payload = {
       name: $('#ac-name').value.trim(),
       base_url: $('#ac-url').value.trim(),
+      site: $('#ac-site').value,
       cookie: $('#ac-cookie').value.trim(),
       schedule_time: $('#ac-schedule').value,
       jitter_seconds: $('#ac-jitter').value === '' ? null : Number($('#ac-jitter').value),
