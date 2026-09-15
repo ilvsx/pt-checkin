@@ -1,0 +1,10 @@
+# 本项目仅依赖 Python 标准库即可运行（Python >= 3.9）。
+#
+# 以下是完全可选的增强依赖：
+#
+#   cryptography —— 用于对保存的 Cookie 做真正的加密（Fernet/AES）。
+#                   若未安装，程序会自动退化为仅混淆存储，并在界面/日志中提示。
+#
+# 安装（可选）：
+#   python3 -m pip install cryptography
+cryptography>=41.0

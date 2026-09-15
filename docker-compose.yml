@@ -1,0 +1,17 @@
+services:
+  pt-checkin:
+    build: .
+    image: pt-checkin:latest
+    container_name: pt-checkin
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      # 数据目录（数据库、配置、加密密钥）必须持久化
+      - ./data:/data
+    environment:
+      TZ: Asia/Shanghai
+      PTCHECKIN_HOST: 0.0.0.0
+      PTCHECKIN_PORT: "8787"
+      # 暴露到公网/局域网时强烈建议设置访问令牌
+      # PTCHECKIN_TOKEN: "change-me"

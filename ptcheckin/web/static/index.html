@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>PT 自动签到 · HHClub</title>
+<link rel="stylesheet" href="/static/style.css"/>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✅</text></svg>"/>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">✅</span>
+    <div>
+      <div class="brand-title">PT 自动签到</div>
+      <div class="brand-sub" id="site-label">HHClub · attendance.php</div>
+    </div>
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview">概览</button>
+    <button class="tab" data-tab="records">签到记录</button>
+    <button class="tab" data-tab="calendar">签到日历</button>
+    <button class="tab" data-tab="settings">设置</button>
+  </nav>
+
+  <div class="top-actions">
+    <div class="clock" id="clock">--:--:--</div>
+    <button class="btn ghost" id="btn-refresh" title="刷新数据">刷新</button>
+    <button class="btn ghost" id="btn-checkin-all">全部签到</button>
+    <button class="btn primary" id="btn-add">+ 添加账号</button>
+  </div>
+</header>
+
+<main>
+  <!-- ======================= 概览 ======================= -->
+  <section class="view active" id="view-overview">
+    <div class="stat-grid" id="stat-grid"></div>
+    <div class="section-head">
+      <h2>账号状态</h2>
+      <div class="muted" id="scheduler-line">调度器信息加载中…</div>
+    </div>
+    <div class="account-grid" id="account-grid">
+      <div class="empty">加载中…</div>
+    </div>
+  </section>
+
+  <!-- ======================= 记录 ======================= -->
+  <section class="view" id="view-records">
+    <div class="filters card">
+      <label>账号
+        <select id="rec-account"><option value="">全部账号</option></select>
+      </label>
+      <label>状态
+        <select id="rec-status">
+          <option value="">全部状态</option>
+          <option value="success">签到成功</option>
+          <option value="already">今日已签到</option>
+          <option value="failed">签到失败</option>
+          <option value="auth_failed">Cookie 失效</option>
+          <option value="network_error">网络错误</option>
+        </select>
+      </label>
+      <label>开始日期 <input type="date" id="rec-from"/></label>
+      <label>结束日期 <input type="date" id="rec-to"/></label>
+      <label>每页
+        <select id="rec-size">
+          <option>20</option><option>50</option><option>100</option>
+        </select>
+      </label>
+      <button class="btn primary" id="rec-search">查询</button>
+      <button class="btn ghost" id="rec-reset">重置</button>
+    </div>
+    <div class="card table-card">
+      <table class="data-table" id="rec-table">
+        <thead>
+          <tr>
+            <th>时间</th><th>账号</th><th>站点日期</th><th>状态</th><th>获得</th>
+            <th>连续</th><th>排名</th><th>触发</th><th>耗时</th><th>详情</th>
+          </tr>
+        </thead>
+        <tbody id="rec-body"></tbody>
+      </table>
+      <div class="pager" id="rec-pager"></div>
+    </div>
+  </section>
+
+  <!-- ======================= 日历 ======================= -->
+  <section class="view" id="view-calendar">
+    <div class="filters card">
+      <label>账号 <select id="cal-account"></select></label>
+      <button class="btn ghost" id="cal-prev">← 上月</button>
+      <div class="cal-month" id="cal-month">----</div>
+      <button class="btn ghost" id="cal-next">下月 →</button>
+      <button class="btn ghost" id="cal-today">回到本月</button>
+      <div class="spacer"></div>
+      <div class="muted" id="cal-summary"></div>
+    </div>
+    <div class="card">
+      <div class="calendar" id="calendar"></div>
+      <div class="legend">
+        <span><i class="dot signed"></i> 已签到</span>
+        <span><i class="dot retro"></i> 补签</span>
+        <span><i class="dot missed"></i> 未签到</span>
+        <span><i class="dot today"></i> 今天</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= 设置 ======================= -->
+  <section class="view" id="view-settings">
+    <div class="settings-grid">
+      <div class="card">
+        <h3>签到调度</h3>
+        <div class="form-row"><label>默认签到时间</label><input type="time" id="set-schedule"/></div>
+        <div class="form-row"><label>随机延迟上限（秒）</label><input type="number" id="set-jitter" min="0"/></div>
+        <div class="form-row"><label>时区</label><input type="text" id="set-tz" placeholder="Asia/Shanghai"/></div>
+        <div class="form-row"><label>启用调度</label><input type="checkbox" id="set-enabled"/></div>
+        <div class="form-row"><label>调度检查间隔（秒）</label><input type="number" id="set-tick" min="5"/></div>
+        <div class="form-row"><label>每日最大重试次数</label><input type="number" id="set-retries" min="0"/></div>
+        <div class="form-row"><label>重试间隔（秒）</label><input type="number" id="set-retry-interval" min="0"/></div>
+      </div>
+
+      <div class="card">
+        <h3>网络与安全</h3>
+        <div class="form-row"><label>请求超时（秒）</label><input type="number" id="set-timeout" min="5"/></div>
+        <div class="form-row"><label>校验 TLS 证书</label><input type="checkbox" id="set-verify"/></div>
+        <div class="form-row"><label>代理地址</label><input type="text" id="set-proxy" placeholder="http://127.0.0.1:7890"/></div>
+        <div class="form-row"><label>Web 监听地址</label><input type="text" id="set-host"/></div>
+        <div class="form-row"><label>Web 端口</label><input type="number" id="set-port" min="1" max="65535"/></div>
+        <div class="form-row"><label>访问令牌</label><input type="text" id="set-token" placeholder="留空表示不校验"/></div>
+        <div class="form-row"><label>原始响应保留天数</label><input type="number" id="set-keep" min="0"/></div>
+        <p class="muted small">修改监听地址/端口/令牌后需要重启服务才会完全生效。</p>
+      </div>
+
+      <div class="card span-2">
+        <h3>通知</h3>
+        <div class="form-row inline">
+          <label><input type="checkbox" id="notify-enabled"/> 启用通知</label>
+          <label><input type="checkbox" id="notify-success"/> 成功时通知</label>
+          <label><input type="checkbox" id="notify-already"/> 已签到时通知</label>
+          <label><input type="checkbox" id="notify-failure"/> 失败时通知</label>
+          <label><input type="checkbox" id="notify-recovered"/> 恢复时通知</label>
+        </div>
+        <div id="channel-list" class="channel-list"></div>
+        <div class="row-actions">
+          <select id="channel-type">
+            <option value="webhook">通用 Webhook</option>
+            <option value="serverchan">Server酱</option>
+            <option value="bark">Bark</option>
+            <option value="telegram">Telegram</option>
+            <option value="ntfy">ntfy</option>
+          </select>
+          <button class="btn ghost" id="btn-add-channel">+ 添加渠道</button>
+          <button class="btn ghost" id="btn-test-notify">发送测试通知</button>
+        </div>
+      </div>
+    </div>
+    <div class="save-bar">
+      <button class="btn primary" id="btn-save-settings">保存设置</button>
+      <span class="muted" id="settings-meta"></span>
+    </div>
+  </section>
+</main>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
