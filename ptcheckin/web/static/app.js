@@ -582,6 +582,24 @@ const CHANNEL_TYPES = {
     label: 'ntfy',
     fields: [{ k: 'url', label: 'Topic URL', ph: 'https://ntfy.sh/my-topic' }, { k: 'token', label: 'Token', ph: '可选' }],
   },
+  feishu: {
+    label: '飞书（自定义机器人）',
+    fields: [
+      { k: 'url', label: 'Webhook 地址', ph: 'https://open.feishu.cn/open-apis/bot/v2/hook/xxxx' },
+      { k: 'secret', label: '签名校验 Secret', ph: '开启「签名校验」时必填，否则留空' },
+      { k: 'card', label: '使用消息卡片（更好看）', type: 'checkbox' },
+    ],
+  },
+  feishu_app: {
+    label: '飞书（应用机器人）',
+    fields: [
+      { k: 'app_id', label: 'App ID', ph: 'cli_xxxxxxxx' },
+      { k: 'app_secret', label: 'App Secret', ph: '应用凭证密钥' },
+      { k: 'receive_id', label: '接收方 ID', ph: '群 chat_id（oc_xxx）/ open_id / email' },
+      { k: 'receive_id_type', label: 'ID 类型', ph: 'chat_id（默认）' },
+      { k: 'card', label: '使用消息卡片（更好看）', type: 'checkbox' },
+    ],
+  },
 };
 
 async function loadSettings() {
@@ -629,10 +647,11 @@ function renderChannels(channels) {
   }
   list.innerHTML = channels.map((ch, idx) => {
     const def = CHANNEL_TYPES[ch.type] || { label: ch.type, fields: [] };
-    const fields = def.fields.map((f) => `
-      <label>${esc(f.label)}
+    const fields = def.fields.map((f) => (f.type === 'checkbox'
+      ? `<label class="ch-check"><input type="checkbox" data-ch="${idx}" data-key="${esc(f.k)}" ${ch[f.k] ? 'checked' : ''}/> ${esc(f.label)}</label>`
+      : `<label>${esc(f.label)}
         <input data-ch="${idx}" data-key="${esc(f.k)}" value="${esc(ch[f.k] || '')}" placeholder="${esc(f.ph || '')}"/>
-      </label>`).join('');
+      </label>`)).join('');
     return `
       <div class="channel-row" data-idx="${idx}">
         <div class="ch-head">
